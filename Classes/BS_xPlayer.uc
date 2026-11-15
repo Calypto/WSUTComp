@@ -304,6 +304,14 @@ simulated function DbgLog(coerce string msg)
 // Exit/Quit handlers. They ask the server to drop the player first, and run
 // the real command once it has (or after LEAVE_ACK_TIMEOUT if it never
 // answers). Entering the command again while waiting runs it immediately.
+//
+// LEAVE-LOGOUT: Destroy() on a connected PlayerController doesn't destroy it.
+// The engine only sets bPendingDestroy and closes the connection, and keeps
+// the controller (with its pawn, PRI, slot and name) until the client
+// acknowledges the close, or until 5 seconds pass without hearing from it
+// (UNetConnection::Tick). With MutUTComp.bInstantLeaveLogout, ServerLeaving
+// calls LeaveGameNow() first, so the player leaves the game as soon as the
+// request arrives and only the empty connection waits out those seconds.
 exec function Disconnect(optional string Args)
 {
     RequestLeave("Disconnect" @ Args);
@@ -359,6 +367,14 @@ function ServerLeaving()
     // client acknowledges that close, the connection and this controller go
     // away, like a kick.
     ClientLeaveAck();
+
+    // LEAVE-LOGOUT: leave the game now, not when the engine frees this controller
+    if (RepInfo == None)                                                    // LEAVE-LOGOUT
+        foreach DynamicActors(Class'UTComp_ServerReplicationInfo', RepInfo) // LEAVE-LOGOUT
+            break;                                                          // LEAVE-LOGOUT
+    if (RepInfo != None && RepInfo.bInstantLeaveLogout)                     // LEAVE-LOGOUT
+        LeaveGameNow();                                                     // LEAVE-LOGOUT
+
     Destroy();
 }
 
@@ -367,6 +383,76 @@ function ClientLeaveAck()
     if (PendingLeaveCommand != "")
         RunLeaveCommand(PendingLeaveCommand);
 }
+
+// LEAVE-LOGOUT: the game side of Destroyed(), in the same order (BS_xPlayer,
+// then PlayerController, then Controller), run when the leave request arrives.
+// Each step leaves nothing for the real Destroyed() to repeat later: the
+// LinkedReplicationInfos and the PRI are gone, AdminLogout() clears
+// AdminManager, the pawn is dead, bIsPlayer is off so Controller.Destroyed()
+// skips Logout, and RemoveController() does nothing the second time.
+function LeaveGameNow()
+{
+    local LinkedReplicationInfo LPRI, Next;
+    local Vehicle DrivenVehicle;
+    local Pawn Driver;
+
+    // BS_xPlayer.Destroyed
+    if (PlayerReplicationInfo != None)
+    {
+        LPRI = PlayerReplicationInfo.CustomReplicationInfo;
+        while (LPRI != None)
+        {
+            Next = LPRI.NextReplicationInfo;
+            LPRI.Destroy();
+            LPRI = Next;
+        }
+        PlayerReplicationInfo.CustomReplicationInfo = None;
+    }
+
+    // PlayerController.Destroyed. AdminManager is private there, so this goes
+    // through the AdminLogout command, which also sets it to None.
+    AdminLogout();
+
+    if (Pawn != None)
+    {
+        DrivenVehicle = Vehicle(Pawn);
+        if (DrivenVehicle != None)
+        {
+            Driver = DrivenVehicle.Driver;
+            DrivenVehicle.KDriverLeave(true);
+            if (Driver != None)
+            {
+                Driver.Health = 0;
+                Driver.Died(self, class'Suicided', Driver.Location);
+            }
+        }
+        else
+        {
+            Pawn.Health = 0;
+            Pawn.Died(self, class'Suicided', Pawn.Location);
+        }
+    }
+
+    // Died() put us in state Dead, from where we could be restarted.
+    GotoState('LeftGame');
+
+    // Controller.Destroyed. Off the controller list, game loops such as
+    // DeathMatch's bForceRespawn no longer see us.
+    RemoveController();
+    if (bIsPlayer && Level.Game != None)
+        Level.Game.Logout(self);
+    bIsPlayer = false;
+    if (PlayerReplicationInfo != None)
+    {
+        if (!PlayerReplicationInfo.bOnlySpectator && PlayerReplicationInfo.Team != None)
+            PlayerReplicationInfo.Team.RemoveFromTeam(self);
+        PlayerReplicationInfo.Destroy();
+        PlayerReplicationInfo = None;
+    }
+}
+
+// (LEAVE-LOGOUT: state LeftGame is at the end of the class. Its ignores list
+// names functions declared further down, which the compiler must see first.)
 
 simulated function SaveSettings()
 {
@@ -5158,7 +5244,7 @@ exec function ServerSetMenuColor(string playerID)
 
     foreach DynamicActors(class'PlayerController', PC)
     {
-        if(PC.PlayerReplicationInfo.PlayerID == int(playerID)) 
+        if(PC.PlayerReplicationInfo != None && PC.PlayerReplicationInfo.PlayerID == int(playerID)) // LEAVE-LOGOUT: None check
         {
             log("UTComp ban for Player : "$PC.PlayerReplicationInfo.PlayerName$" ("$PC.GetPlayerIDHash()$")");
             if(BS_xPlayer(PC) != None) 
@@ -6410,6 +6496,17 @@ function MaybeSendCamOffsetToServer()
         camOffset.Y,
         camOffset.Z,
         bDisableEnhanced3P);
+}
+
+// LEAVE-LOGOUT: LeaveGameNow() parks the controller here until the engine frees
+// it (up to 5 seconds). Calls the client sent before it got ClientLeaveAck
+// would otherwise respawn it, rejoin or switch teams, or chat, vote or ready up
+// with no PRI. Kept at the end of the class because ignores only accepts
+// functions the compiler has already seen.
+state LeftGame
+{
+ignores Timer, ServerReStartPlayer, BecomeActivePlayer, BecomeSpectator, ServerSpectate, ServerChangeTeam,
+    ServerSay, ServerTeamSay, Ready, NotReady, CallVote, BroadcastVote, BroadcastReady;
 }
 
 defaultproperties

@@ -138,6 +138,9 @@ var config bool bUseLinkMesh;
 
 var config bool bSpectatorVoiceChat;
 
+// LEAVE-LOGOUT: log a player out when their leave request arrives, see BS_xPlayer.LeaveGameNow
+var config bool bInstantLeaveLogout; // LEAVE-LOGOUT
+
 var bool bDemoStarted;
 var bool bEnableDoubleDamageVoting;
 var bool bWarmupDisabled;
@@ -1085,6 +1088,7 @@ function SpawnReplicationClass()
 	RepInfo.bDisableCameraShake = bDisableCameraShake;
 	RepInfo.bAllowTerrainDodge = bAllowTerrainDodge;
     RepInfo.bSpectatorVoiceChat = bSpectatorVoiceChat;
+    RepInfo.bInstantLeaveLogout = bInstantLeaveLogout; // LEAVE-LOGOUT
 
     for(i=0; i<VotingGametype.Length && i<ArrayCount(RepInfo.VotingNames); i++)
         RepInfo.VotingNames[i]=VotingGametype[i].GameTypeName;
@@ -1937,6 +1941,7 @@ static function FillPlayInfo (PlayInfo PlayInfo)
     PlayInfo.AddSetting("UTComp Settings", "bShowSpawnsDuringWarmup", "Show Spawns during Warmup", security, weight,"Check");
     PlayInfo.AddSetting("UTComp Settings", "bEnableEmoticons", "Enable Emoticons", security, weight,"Check");
     PlayInfo.AddSetting("UTComp Settings", "bSpectatorVoiceChat", "Spectator voice chat", security, weight,"Check");
+    PlayInfo.AddSetting("UTComp Settings", "bInstantLeaveLogout", "Remove leaving players instantly", security, weight,"Check"); // LEAVE-LOGOUT
     PlayInfo.AddSetting("UTComp Settings", "bFastWeaponSwitch", "Fast weapon switch", security, weight,"Check");
     PlayInfo.AddSetting("UTComp Settings", "bAllowColorWeapons", "Enable color weapons", security, weight,"Check");
     PlayInfo.AddSetting("UTComp Settings", "bNoTeamBoosting", "Teammates can't knock you around with weapons", security, weight,"Check");
@@ -2029,6 +2034,7 @@ static event string GetDescriptionText(string PropName)
         case "bShowSpawnsDuringWarmup": return "Show spawn points during warmup by spawning dummies on every one of them";
         case "bEnableEmoticons": return "Enable emoticons";
         case "bSpectatorVoiceChat": return "Stock UT2004 keeps anyone who connects as a spectator out of voice chat. With this on, spectators join the Public channel and talk on it, and coaches (SpecLockRed/SpecLockBlue) also join their team's channel and talk on that. Spectators also get the talk meter and talker portraits on their HUD, and their speech menu key opens a voice chat menu. Changes apply from the next map. (default off)";
+        case "bInstantLeaveLogout": return "When a player leaves with Disconnect, Reconnect, Exit or Quit, they are removed from the game as soon as the server hears they are leaving: their pawn dies as in a normal disconnect, the 'left the server' message shows, and their scoreboard entry, slot and name are freed. Off: they stay in the game for up to 5 seconds while the engine waits for their connection to close. Changes apply from the next map. (default on)"; // LEAVE-LOGOUT
         case "bFastWeaponSwitch": return "Enable UT2003 style fast weapon switch";
         case "bAllowColorWeapons": return "Enable color weapons";
         case "bNoTeamBoosting": return "Teammates can't knock you around with weapons";
@@ -2335,6 +2341,8 @@ defaultproperties
      VehicleUpdateMode=0
      SpectatorUpdateRate=0
      bSpectatorVoiceChat=False
+     // LEAVE-LOGOUT
+     bInstantLeaveLogout=True
 
      //original weapons
      WeaponClassNames(0)="XWeapons.ShockRifle"

@@ -90,6 +90,8 @@ var bool bAllowTerrainDodge;
 
 var bool bSpectatorVoiceChat;
 
+var bool bInstantLeaveLogout; // LEAVE-LOGOUT: server only, not replicated (MutUTComp.bInstantLeaveLogout)
+
 replication
 {
     reliable if(Role==Role_Authority)
