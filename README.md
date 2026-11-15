@@ -2,10 +2,11 @@
 
 Wicked Sick UTComp
 
-based on [UTCompOmni 1.71](https://github.com/zenakuten/UTCompOmni) 
-which was in turn based on [UTComp 1.8c](https://github.com/Deaod/UTComp)
+Based on [UTCompOmni 1.71](https://github.com/zenakuten/UTCompOmni), which was in turn based on [UTComp 1.8c](https://github.com/Deaod/UTComp)
 
+[Player Guide](./Docs/client/user-guide.md) / [Server Guide](./Docs/server/server-guide.md)
 
+---
 Release Notes
 
 V33
@@ -39,7 +40,7 @@ V33
 
 V32
 - bump utcomp and 3spn version labels to v32
-- [3374-rc3](https://github.com/OldUnreal/UT2004Patches/releases/tag/3374-rc3) fixes camera code so now the aim-related workarounds are enabled for <v3374
+- [3374-rc3](https://github.com/OldUnreal/UT2004Patches/releases/tag/3374-rc3) fixes camera code so now the aim/camera-related workarounds are only enabled for <v3374
 
 V31
 - use cached emoticon parsing in tam and freon extended scoreboards
