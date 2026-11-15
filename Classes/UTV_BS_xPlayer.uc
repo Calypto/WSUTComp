@@ -52,7 +52,8 @@ simulated function Pawn GetPawnFromName(string name)
 {
 	local Pawn tempPawn;
 
-	foreach AllActors(class'Pawn',tempPawn){
+	// Called every frame while UTV drives the view; pawns are never bStatic.
+	foreach DynamicActors(class'Pawn',tempPawn){
 		if(tempPawn.PlayerReplicationInfo!=none && tempPawn.PlayerReplicationInfo.PlayerName==name){
 			return tempPawn;
 			break;

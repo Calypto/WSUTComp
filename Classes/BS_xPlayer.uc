@@ -182,6 +182,9 @@ var int VehiclePingMS;
 
 var UTComp_Settings Settings;
 var UTComp_HUDSettings HUDSettings;
+// Client: brightskin lookups for this level, created by the first UTComp_xPawn that skins
+// (UTComp_xPawn.SkinVariant). Held here so it is freed with the level.
+var UTComp_SkinCache SkinCache;
 
 var float LastWeaponEffectSent;
 
@@ -573,6 +576,15 @@ simulated function Destroyed()
 
     if(Settings != None)
         Settings.default.Instance = None;
+
+    // Server: the emoticon RI only destroys itself (Owner == None) from Tick, and its Tick
+    // stops once every emoticon is sent, so without this it outlived each departed player.
+    // A client keeps its torn-off copy until the map ends.
+    if(EmoteInfo != None && Level.NetMode != NM_Client)
+    {
+        EmoteInfo.Destroy();
+        EmoteInfo = None;
+    }
 
     if(PlayerReplicationInfo != None)
     {

@@ -132,6 +132,7 @@ simulated function DrawTeamRadar(Canvas C)
     local Pawn Pawn;
     local Vector eyePos;
     local UTComp_ServerReplicationInfo RepInfo;
+    local byte OwnerTeam;
 
     if(!Level.GRI.bTeamGame)
         return;
@@ -155,14 +156,17 @@ simulated function DrawTeamRadar(Canvas C)
 
     if(UEngine != none)
     {
-        foreach AllActors(class'Pawn', Pawn)
+        // Runs every frame: pawns are never bStatic, so DynamicActors finds the same pawns
+        // without walking the map's static actors, and the per-loop values are read once.
+        OwnerTeam = PawnOwner.GetTeamNum();
+        eyePos = PlayerOwner.CalcViewLocation;
+        foreach DynamicActors(class'Pawn', Pawn)
         {
             if(PawnOwner == Pawn)
                 continue;
-        
-            if(Pawn.GetTeamNum() == PawnOwner.GetTeamNum())
+
+            if(Pawn.GetTeamNum() == OwnerTeam)
             {
-                eyePos = PlayerOwner.CalcViewLocation;
                 if(VSize(eyePos - Pawn.Location) < RepInfo.TeamRadarCullDistance && !FastTrace(eyePos, Pawn.Location))
                 {
                     if(ONSVehicle(Pawn) != None && !IsVehicleEmpty(ONSVehicle(Pawn)))

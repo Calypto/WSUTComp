@@ -340,6 +340,8 @@ function ServerSendMapList()
     {
         bWantsMapList=False;
         bMapListCompleted=True;
+        // GetMapList never sends again once completed, so drop this player's server copy.
+        UTCompMapList.Length=0;
     }
 }
 

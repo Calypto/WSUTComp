@@ -45,6 +45,21 @@ var float RepOverlayTimer;
 var name RepAnimAction;
 var bool bRepSimulateGravity;
 var float lastSkinUpdateTime;
+
+// Brightskin materials of this pawn, reused by every ColorSkins call: one Combiner per skin
+// slot and one ConstantColor (UTComp skin colour, slot 0). They come from Level.ObjectPool
+// and go back in Destroyed. ColorSkins runs at least twice per life (Setup, end of spawn
+// protection) and used to build new objects each time; those piled up until the next
+// garbage collection, which on a client is usually the map change.
+var array<Combiner> SkinCombiners;
+var ConstantColor SkinColor;
+
+// The local player's UTComp_SkinCache (see SkinVariant), and its skin variants.
+var UTComp_SkinCache SkinCache;
+const SKIN_DM = 0;
+const SKIN_RED = 1;
+const SKIN_BLUE = 2;
+
 var Material DeResMatColored0, DeResMatColored1;
 var ColorModifier DeResModifier0;
 var ColorModifier DeResModifier1;
@@ -830,80 +845,123 @@ simulated function int GetColorModeBright()
 simulated function material ChangeOnlyColor(material SkinToChange)
 {
     // If not on a team, force Deathmatch skin
-    if(GetTeamNum() == 255) 
-        return MakeDMSkin(SkinToChange);
+    if(GetTeamNum() == 255)
+        return SkinVariant(SkinToChange, SKIN_DM);
 
     switch(GetDefaultEpicColorMode())
     {
-        case 1:  return MakeRedSkin(SkinToChange);
-        case 2:  return MakeBlueSkin(SkinToChange);
+        case 1:  return SkinVariant(SkinToChange, SKIN_RED);
+        case 2:  return SkinVariant(SkinToChange, SKIN_BLUE);
     }
     return SkinToChange;
 }
 
 simulated function material ChangeColorAndBrightness(material SkinToChange, int SkinNum)
 {
+    local Material M;
+
     // If not on a team, force Bright Deathmatch skin
-    if(GetTeamNum() == 255) 
+    if(GetTeamNum() == 255)
     {
-        if(SkinNum == 1) return MakeDMSkin(SkinToChange);
-        return MakeBrightDMSkin(SkinToChange);
+        M = SkinVariant(SkinToChange, SKIN_DM);
+        if(SkinNum == 1) return M;
+        return MakeBrightCombiner(M, GetSkinCombiner(SkinNum));
     }
 
     switch(GetDefaultBrightColorMode())
     {
-        case 5:
-            if(SkinNum==1) return MakeRedSkin(SkinToChange);
-            return MakeBrightRedSkin(SkinToChange);
-        case 6:
-            if(SkinNum==1) return MakeBlueSkin(SkinToChange);
-            return MakeBrightBlueSkin(SkinToChange);
+        case 5:  M = SkinVariant(SkinToChange, SKIN_RED);  break;
+        case 6:  M = SkinVariant(SkinToChange, SKIN_BLUE); break;
+        default: return SkinToChange;
     }
-    return SkinToChange;
+    // The head (slot 1) and anything that isn't a texture stay as they are.
+    if(SkinNum == 1 || Texture(M) == None)
+        return M;
+    return MakeBrightCombiner(M, GetSkinCombiner(SkinNum));
+}
+
+// MakeDMSkin, MakeRedSkin or MakeBlueSkin (Variant = SKIN_*) of Source. Each name lookup
+// behind them runs once per level, through the local player's UTComp_SkinCache.
+simulated function Material SkinVariant(Material Source, int Variant)
+{
+    local BS_xPlayer P;
+
+    if(SkinCache == None)
+    {
+        if(LocalPC == None)
+            LocalPC = Level.GetLocalPlayerController();
+        P = BS_xPlayer(LocalPC);
+        if(P == None)
+            return MakeSkinVariant(Source, Variant);
+        if(P.SkinCache == None)
+            P.SkinCache = new class'UTComp_SkinCache';
+        SkinCache = P.SkinCache;
+    }
+    return SkinCache.Get(Source, Variant);
+}
+
+// Uncached MakeDMSkin, MakeRedSkin or MakeBlueSkin (Variant = SKIN_*) of Source.
+simulated static function Material MakeSkinVariant(Material Source, int Variant)
+{
+    switch(Variant)
+    {
+        case SKIN_RED:  return MakeRedSkin(Source);
+        case SKIN_BLUE: return MakeBlueSkin(Source);
+    }
+    return MakeDMSkin(Source);
+}
+
+// This pawn's Combiner for skin slot SkinNum (see SkinCombiners). Every user sets
+// CombineOperation, Material1 and Material2, so a reused one draws like a new one.
+simulated function Combiner GetSkinCombiner(int SkinNum)
+{
+    if(SkinNum >= SkinCombiners.Length || SkinCombiners[SkinNum] == None)
+        SkinCombiners[SkinNum] = Combiner(Level.ObjectPool.AllocateObject(class'Combiner'));
+    return SkinCombiners[SkinNum];
 }
 
 simulated function material ChangeToUTCompSkin(material SkinToChange, byte SkinNum)
 {
     local Combiner C;
-    local ConstantColor CC;
     local PlayerController LPC;
 
-    if(SkinNum>0) return MakeDMSkin(SkinToChange);
+    if(SkinNum>0) return SkinVariant(SkinToChange, SKIN_DM);
 
     // In Deathmatch, use default uncolored DM skins only if Enemy Based Skins is off.
     // If it's on, skip this and proceed to the combiner to colorize enemies.
     if(GetTeamNum() == 255 && (Settings == None || !Settings.bEnemyBasedSkins))
-        return MakeDMSkin(SkinToChange);
+        return SkinVariant(SkinToChange, SKIN_DM);
 
-    C=New(None)Class'Combiner';
-    CC=New(None)Class'ConstantColor';
-
-    if(C == None || CC == None) return SkinToChange;
-
+    C=GetSkinCombiner(0);
     C.CombineOperation=CO_Add;
-    C.Material1=MakeDMSkin(SkinToChange);
+    C.Material1=SkinVariant(SkinToChange, SKIN_DM);
 
-    if(Settings == None) return C;
+    if(Settings == None)
+    {
+        C.Material2=None;
+        return C;
+    }
+
+    if(SkinColor == None)
+        SkinColor=ConstantColor(Level.ObjectPool.AllocateObject(class'ConstantColor'));
 
     if(IsSpawnProtectionEnabled())
     {
         LPC = Level.GetLocalPlayerController();
         if(LPC != None && LPC.GetTeamNum() == GetTeamNum())
-            CC.Color=MakeClanSkin(Settings.SpawnProtectedUTCompSkinColorTeam);
+            SkinColor.Color=MakeClanSkin(Settings.SpawnProtectedUTCompSkinColorTeam);
         else
-            CC.Color=MakeClanSkin(Settings.SpawnProtectedUTCompSkinColor);
+            SkinColor.Color=MakeClanSkin(Settings.SpawnProtectedUTCompSkinColor);
     }
     // Uses the relational check so Enemy-Based settings apply to the RGB colors
     else if(IsTeammate())
-        CC.Color=MakeClanSkin(Settings.RedTeammateUTCompSkinColor);
+        SkinColor.Color=MakeClanSkin(Settings.RedTeammateUTCompSkinColor);
     else
-        CC.Color=MakeClanSkin(Settings.BlueEnemyUTCompSkinColor);
+        SkinColor.Color=MakeClanSkin(Settings.BlueEnemyUTCompSkinColor);
 
-    SavedColor=CC.Color;
-    C.Material2=CC;
-
-    if(C!=None) return C;
-    return SkinToChange;
+    SavedColor=SkinColor.Color;
+    C.Material2=SkinColor;
+    return C;
 }
 
 simulated function color MakeClanSkin(color PreviousColor)
@@ -1022,46 +1080,43 @@ simulated function material MakePurpleSkin(material SkinToChange)
        return ChangeOnlyColor(SkinToChange);
 }
 
+// Additive Combiner of M with itself, which brightens it. Fills C when given one (a pawn's
+// reused SkinCombiners entry); the brightskins menu preview calls the MakeBright* helpers
+// below, which make a new one.
+simulated static function Combiner MakeBrightCombiner(material M, optional Combiner C)
+{
+    if(C == None)
+        C=New(None)class'Combiner';
+    C.CombineOperation=CO_Add;
+    C.Material1=M;
+    C.Material2=M;
+    return C;
+}
+
 simulated static function material MakeBrightDMSkin(material SkinToChange)
 {
-    local Combiner C;
-
-    C=New(None)class'Combiner';
-    C.CombineOperation=CO_Add;
-    C.Material1=MakeDMSkin(SkinToChange);
-    C.Material2=C.Material1;
-
-    return C;
+    return MakeBrightCombiner(MakeDMSkin(SkinToChange));
 }
 
 simulated static function material MakeBrightRedSkin(material SkinToChange)
 {
-    local Combiner C;
-    C=New(None)Class'Combiner';
+    local Material M;
 
-    C.Material1=MakeRedSkin(SkinToChange);
-    C.Material2=C.Material1;
-    C.CombineOperation=CO_Add;
-
-    if(C.Material1.IsA('Texture'))
-        return C;
-    else
-        return C.Material1;
+    // Only a texture gets the brightening combiner; anything else is returned as is.
+    M=MakeRedSkin(SkinToChange);
+    if(Texture(M) == None)
+        return M;
+    return MakeBrightCombiner(M);
 }
 
 simulated static function material MakeBrightBlueSkin(material SkinToChange)
 {
-    local Combiner C;
-    C=New(None)Class'Combiner';
+    local Material M;
 
-    C.Material1=MakeBlueSkin(SkinToChange);
-    C.Material2=C.Material1;
-    C.CombineOperation=CO_Add;
-
-    if(C.Material1.IsA('Texture'))
-        return C;
-    else
-        return C.Material1;
+    M=MakeBlueSkin(SkinToChange);
+    if(Texture(M) == None)
+        return M;
+    return MakeBrightCombiner(M);
 }
 
 simulated function material MakeBrightPurpleSkin(material SkinToChange)
@@ -1400,12 +1455,19 @@ function ServerChangedWeapon(Weapon OldWeapon, Weapon NewWeapon)
 
 simulated function Destroyed()
 {
+    local int i;
+
     if(SlopeHelper != None)
         SlopeHelper.Destroy();
     if(DeResModifier0 != None)
         Level.ObjectPool.FreeObject(DeResModifier0);
     if(DeResModifier1 != None)
         Level.ObjectPool.FreeObject(DeResModifier1);
+    for(i=0; i<SkinCombiners.Length; i++)
+        if(SkinCombiners[i] != None)
+            Level.ObjectPool.FreeObject(SkinCombiners[i]);
+    if(SkinColor != None)
+        Level.ObjectPool.FreeObject(SkinColor);
 
     super.Destroyed();
 }
