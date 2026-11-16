@@ -6,7 +6,8 @@ Based on [UTCompOmni 1.71](https://github.com/zenakuten/UTCompOmni), which was i
 
 [Player Guide](./Docs/client/user-guide.md) / [Server Guide](./Docs/server/server-guide.md)
 
----
+<br>
+
 Release Notes
 
 V33
