@@ -756,9 +756,11 @@ function Actor TimeTravelTrace(Actor Tracer, Pawn Shooter, out vector HitLocatio
     else
         NewEnd = End;
 
+    // TraceActors runs this body for every hit, not just copies; for other
+    // hits C keeps its last value (None at first), so check it
     foreach Tracer.TraceActors(class'PawnCollisionCopy', C, CopyHitLocation, CopyHitNormal, NewEnd, Start)
     {
-        if(C.CopiedPawn != None && C.CopiedPawn != Shooter)
+        if(C != None && C.CopiedPawn != None && C.CopiedPawn != Shooter)
         {
             HitCopy = C;
             break;
