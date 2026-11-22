@@ -103,6 +103,11 @@ var config bool bDebug;
 
 var config int MouseDPI; // mouse DPI, used only for the Misc menu cm/360 display
 
+// Vehicles whose server Karma states are applied as-is instead of smoothed in
+// (bSmoothKarmaStateUpdates off). Bit flags: 1 your vehicle, 2 everyone else's.
+// 0 off (stock), 1 yours, 2 others, 3 all. See UTComp_VehicleSnap.
+var config byte VehicleSnapMode;
+
 var UTComp_Settings instance;
 
 function Save()
@@ -193,6 +198,7 @@ defaultproperties
     bDisableEnhanced3P=false
 	bDebug=false
     MouseDPI=800
+    VehicleSnapMode=0
 
     instance=none
 }

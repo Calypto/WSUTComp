@@ -191,6 +191,7 @@ var float LastWeaponEffectSent;
 var float LastVRequestTime;
 
 var UTComp_NodeDamageHook NodeDamageHook;
+var UTComp_VehicleSnap VehicleSnap;  // client, only while Settings.VehicleSnapMode != 0
 
 var int PreferredExitPoint;
 var bool bDidWhitelistCheck;
@@ -660,6 +661,12 @@ simulated function Destroyed()
         NodeDamageHook = none;
     }
 
+    if(VehicleSnap != None)
+    {
+        VehicleSnap.Destroy();
+        VehicleSnap = None;
+    }
+
     if(Settings != None)
         Settings.default.Instance = None;
 
@@ -947,6 +954,31 @@ simulated function InitializeClient()
     MatchHudColor();
     GetMapList();
     PreloadMenus();
+    SetVehicleSnapMode(Settings.VehicleSnapMode);
+}
+
+// Client only: on a server or offline, Karma runs locally and there are no states to smooth.
+// Mode 0 (default) restores stock smoothing and removes the helper, so it costs nothing.
+simulated function SetVehicleSnapMode(byte Mode)
+{
+    if (Level.NetMode != NM_Client)
+        return;
+
+    if (Mode == 0)
+    {
+        if (VehicleSnap != None)
+        {
+            VehicleSnap.SetMode(0);
+            VehicleSnap.Destroy();
+            VehicleSnap = None;
+        }
+        return;
+    }
+
+    if (VehicleSnap == None)
+        VehicleSnap = Spawn(class'UTComp_VehicleSnap', self);
+    if (VehicleSnap != None)
+        VehicleSnap.SetMode(Mode);
 }
 
 // Load the UTComp menu classes now, while joining, instead of on the first MyMenu press.
@@ -3979,6 +4011,10 @@ function ClientRestart(Pawn NewPawn)
     LastSentCamOffset = vect(0,0,0);
     LastSentCamDist = -1;
     super.ClientRestart(NewPawn);
+    // Pawn, not NewPawn: super drops a torn-off pawn. If the pawn hasn't replicated yet,
+    // WaitingForPawn calls this again once it has.
+    if (VehicleSnap != None)
+        VehicleSnap.PawnChanged(Pawn);
 }
 
 state PlayerWalking

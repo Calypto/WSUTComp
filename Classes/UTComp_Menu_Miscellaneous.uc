@@ -27,6 +27,7 @@ var automated wsCheckBox ch_Speed;
 var automated wsCheckBox ch_Berserk;
 
 var automated moComboBox co_CrosshairScale;
+var automated wsComboBox co_VehicleSnap;
 
 function InitComponent(GUIController MyController, GUIComponent MyOwner)
 {
@@ -45,6 +46,14 @@ function InitComponent(GUIController MyController, GUIComponent MyOwner)
     ch_UseEyeHeightAlgo.Checked(Settings.bUseNewEyeHeightAlgorithm);
     ch_UseNewNet.Checked(Settings.bEnableEnhancedNetCode);
     ch_ViewSmoothing.Checked(Settings.bViewSmoothing);
+
+    // Index = Settings.VehicleSnapMode (bit 1 yours, bit 2 others)
+    co_VehicleSnap.AddItem("Off");
+    co_VehicleSnap.AddItem("Your vehicle");
+    co_VehicleSnap.AddItem("Other vehicles");
+    co_VehicleSnap.AddItem("All vehicles");
+    co_VehicleSnap.ReadOnly(True);
+    co_VehicleSnap.SetIndex(Settings.VehicleSnapMode);
 
     eb_DPI.IntOnly(true);
     eb_DPI.SetComponentValue(string(Settings.MouseDPI), true);
@@ -89,6 +98,8 @@ function InternalOnChange( GUIComponent C )
             break;
         case ch_UseNewNet:  Settings.bEnableEnhancedNetCode=ch_UseNewNet.IsChecked();
                             BS_xPlayer(PlayerOwner()).TurnOffNetCode(); break;
+        case co_VehicleSnap:  Settings.VehicleSnapMode=co_VehicleSnap.GetIndex();
+                            BS_xPlayer(PlayerOwner()).SetVehicleSnapMode(Settings.VehicleSnapMode); break;
         case ch_ViewSmoothing:  Settings.bViewSmoothing=ch_ViewSmoothing.IsChecked();
             break;
         case eb_DPI:  Settings.MouseDPI=int(eb_DPI.GetText());
@@ -383,6 +394,17 @@ defaultproperties
     End Object
     ch_UseNewNet=wsCheckBox'UTComp_Menu_Miscellaneous.NewNetCheck'
 
+    Begin Object Class=wsComboBox Name=VehicleSnapCombo
+        Caption="Vehicle snapping:"
+        Hint="Apply each server vehicle update as-is instead of smoothing it in: vehicle positions will be less desynced, but vehicle motion will look choppy"
+        OnCreateComponent=VehicleSnapCombo.InternalOnCreateComponent
+        WinWidth=0.250000
+        WinLeft=0.500000
+        WinTop=0.610000
+        OnChange=UTComp_Menu_Miscellaneous.InternalOnChange
+    End Object
+    co_VehicleSnap=wsComboBox'UTComp_Menu_Miscellaneous.VehicleSnapCombo'
+
     Begin Object Class=wsEditBox Name=DPIEditBox
         Caption="DPI for cm/360"
         Hint="Your mouse DPI - used only to display cm/360 below"
@@ -391,7 +413,7 @@ defaultproperties
         WinWidth=0.250000
         WinHeight=0.030000
         WinLeft=0.500000
-        WinTop=0.610000
+        WinTop=0.650000
         OnChange=UTComp_Menu_Miscellaneous.InternalOnChange
     End Object
     eb_DPI=wsEditBox'UTComp_Menu_Miscellaneous.DPIEditBox'
@@ -402,7 +424,7 @@ defaultproperties
         WinWidth=0.480000
         WinHeight=0.030000
         WinLeft=0.500000
-        WinTop=0.650000
+        WinTop=0.690000
     End Object
     l_Cm360=GUILabel'UTComp_Menu_Miscellaneous.Cm360Label'
 }

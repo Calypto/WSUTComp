@@ -353,6 +353,14 @@ A grab bag of scoreboard, gameplay, and netcode options.
   the server has it disabled, the heading notes this and the check box is hidden.
   See `ping-compensation.md` for the technical details.
 
+- **Vehicle snapping** - by default your game smooths each vehicle update from the
+  server in, which lets a vehicle drift up to about 224 units from where the server has
+  it before it snaps back. This applies each update as-is instead, so vehicle positions
+  will be less desynced, but vehicle motion will look choppy. Choose **Your vehicle** (the one you drive), **Other vehicles** (everyone
+  else's, including one you are a gunner in), or **All vehicles**. On your own vehicle
+  at high ping the choppiness can be more noticeable. This is client-side only and changes nothing
+  for other players. Default **Off**.
+
 - **DPI for cm/360** - enter your mouse DPI here (this is the one value the game does not
   already know). The **cm/360** line below shows how far you have to physically move
   the mouse to turn a full 360 degrees, computed from your DPI, sensitivity, FOV, and
