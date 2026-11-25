@@ -4042,12 +4042,54 @@ state PlayerWalking
     // place DoubleClickDir becomes DCLICK_Active, and stock NotifyLanded reads it straight
     // back. Setting and reading in the same path is what keeps the two sides agreeing.
     //
-    // Super runs first because it is what performs the dodge and sets DCLICK_Active.
+    // The stock part runs first because it is what performs the dodge and sets DCLICK_Active.
+    //
+    // The stock part is the two Super levels written out in place, saving two script calls
+    // per move on server and client: UnrealPlayer.PlayerWalking.ProcessMove, then
+    // PlayerController.PlayerWalking.ProcessMove, in their exact order. Differences that
+    // give the same result: unused locals dropped, and Pawn.ShouldCrouch() only called
+    // when it would change bWantsToCrouch (it does nothing otherwise; the only overrides,
+    // on warheads, are empty).
     function ProcessMove(float DeltaTime, vector NewAccel, eDoubleClickDir DoubleClickMove, rotator DeltaRot)
     {
-        Super.ProcessMove(DeltaTime, NewAccel, DoubleClickMove, DeltaRot);
+        local UTComp_xPawn MDPawn;
 
-        if (DoubleClickDir != DCLICK_Active || UTComp_xPawn(Pawn) == None)
+        // UnrealPlayer.PlayerWalking.ProcessMove
+        if ( (DoubleClickMove == DCLICK_Active) && (Pawn.Physics == PHYS_Falling) )
+            DoubleClickDir = DCLICK_Active;
+        else if ( (DoubleClickMove != DCLICK_None) && (DoubleClickMove < DCLICK_Active) )
+        {
+            if ( UnrealPawn(Pawn).Dodge(DoubleClickMove) )
+                DoubleClickDir = DCLICK_Active;
+        }
+
+        // PlayerController.PlayerWalking.ProcessMove
+        if ( Pawn == None )
+            return;
+        if ( Pawn.Acceleration != NewAccel )
+            Pawn.Acceleration = NewAccel;
+        if ( bDoubleJump && (bUpdating || Pawn.CanDoubleJump()) )
+            Pawn.DoDoubleJump(bUpdating);
+        else if ( bPressedJump )
+            Pawn.DoJump(bUpdating);
+
+        Pawn.SetViewPitch(Rotation.Pitch);
+
+        if ( Pawn.Physics != PHYS_Falling )
+        {
+            if (bDuck == 0)
+            {
+                if ( Pawn.bWantsToCrouch )
+                    Pawn.ShouldCrouch(false);
+            }
+            else if ( Pawn.bCanCrouch && !Pawn.bWantsToCrouch )
+                Pawn.ShouldCrouch(true);
+        }
+
+        if (DoubleClickDir != DCLICK_Active)
+            return;
+        MDPawn = UTComp_xPawn(Pawn);
+        if (MDPawn == None)
             return;
 
         // Latched rather than read live, because the consume below clears DoubleClickDir
@@ -4058,9 +4100,9 @@ state PlayerWalking
         // the counter allows it -- this is what gates permission to chain dodges. The
         // counter is refilled in UTComp_xPawn.Landed, and the multijump refill happens in
         // UTComp_xPawn.Dodge; both are already on the move path.
-        if (UTComp_xPawn(Pawn).MultiDodgesRemaining > 0)
+        if (MDPawn.MultiDodgesRemaining > 0)
         {
-            UTComp_xPawn(Pawn).MultiDodgesRemaining -= 1;
+            MDPawn.MultiDodgesRemaining -= 1;
             ClearDoubleClick();
             DoubleClickDir = DCLICK_None;
         }
@@ -5865,7 +5907,7 @@ function ServerDrive(float InForward, float InStrafe, float aUp, bool InJump, in
 {
     local rotator ViewRot;
 
-    ViewRot.Pitch = (((View >>> 15) & 32767) << 1) | ((View >>> 31) & 1);
+    ViewRot.Pitch = ((View >>> 14) & 65534) | (View >>> 31); // same bits as ServerMove's decode
     ViewRot.Yaw = ((View & 32767) << 1) | ((View >>> 30) & 1);
     SetRotation(ViewRot);
     ProcessDrive(InForward, InStrafe, aUp, InJump);
@@ -5874,6 +5916,14 @@ function ServerDrive(float InForward, float InStrafe, float aUp, bool InJump, in
 /* ServerMove()
 - replicated function sent by client to server - contains client movement and firing info.
 */
+// Stock PlayerController.ServerMove, plus the PackExactView decode and the
+// bMoveErrorAccumFix branch. It runs for every client move, so it is trimmed
+// for script calls and operations; every trim gives exactly stock's result:
+// - MoveAutonomous() and HandleWalking() are inlined for the main move, and
+//   Pawn.SetWalking() is only called when the walking flag changes.
+// - ResetTimeMargin() is inlined.
+// - Level.TimeSeconds is read once, and the update age is computed once.
+// - The walking pitch clamp is reduced to what stock's arithmetic gives.
 function ServerMove
 (
     float TimeStamp,
@@ -5890,11 +5940,11 @@ function ServerMove
     optional int OldAccel
 )
 {
-    local float DeltaTime, clientErr, OldTimeStamp;
+    local float DeltaTime, clientErr, OldTimeStamp, MoveNow, UpdateAge;
     local rotator DeltaRot, Rot, ViewRot;
     local vector Accel, LocDiff;
-    local int maxPitch, ViewPitch, ViewYaw;
-    local bool NewbPressedJump, OldbRun, OldbDoubleJump;
+    local int PitchLimit, ViewPitch, ViewYaw;
+    local bool NewbPressedJump, OldbRun, OldbDoubleJump, bNewWalking;
     local eDoubleClickDir OldDoubleClickMove;
 
     // If this move is outdated, discard it.
@@ -5957,7 +6007,9 @@ function ServerMove
     }
 
     // View components, in PackExactView's format. Stock-packed views decode identically.
-    ViewPitch = (((View >>> 15) & 32767) << 1) | ((View >>> 31) & 1);
+    // (View >>> 14) & 65534 equals ((View >>> 15) & 32767) << 1, and since >>> is an
+    // unsigned shift, View >>> 31 is already 0 or 1.
+    ViewPitch = ((View >>> 14) & 65534) | (View >>> 31);
     ViewYaw = ((View & 32767) << 1) | ((View >>> 30) & 1);
     // Make acceleration.
     Accel = InAccel * 0.1;
@@ -5968,9 +6020,14 @@ function ServerMove
     // Save move parameters.
     DeltaTime = FMin(MaxResponseTime,TimeStamp - CurrentTimeStamp);
 
+    // Only the level tick advances TimeSeconds, so one read serves the whole move
+    MoveNow = Level.TimeSeconds;
+
 	if ( Pawn == None )
 	{
-		ResetTimeMargin();
+		// ResetTimeMargin(), inlined
+		TimeMargin = -0.1;
+		MaxTimeMargin = Level.MaxTimeMargin;
 	}
 	else if ( !CheckSpeedHack(DeltaTime) )
 	{
@@ -5986,13 +6043,13 @@ function ServerMove
 	}
 
     CurrentTimeStamp = TimeStamp;
-    ServerTimeStamp = Level.TimeSeconds;
+    ServerTimeStamp = MoveNow;
+    // Roll stays 0: locals start zeroed
     ViewRot.Pitch = ViewPitch;
     ViewRot.Yaw = ViewYaw;
-    ViewRot.Roll = 0;
 
     if ( NewbPressedJump || (InAccel != vect(0,0,0)) )
-		LastActiveTime = Level.TimeSeconds;
+		LastActiveTime = MoveNow;
 
 	if ( Pawn == None || Pawn.bServerMoveSetPawnRot )
 		SetRotation(ViewRot);
@@ -6005,38 +6062,70 @@ function ServerMove
         Rot.Roll = 256 * ClientRoll;
         Rot.Yaw = ViewYaw;
         if ( (Pawn.Physics == PHYS_Swimming) || (Pawn.Physics == PHYS_Flying) )
-            maxPitch = 2;
-        else
-            maxPitch = 0;
-        if ( (ViewPitch > maxPitch * RotationRate.Pitch) && (ViewPitch < 65536 - maxPitch * RotationRate.Pitch) )
         {
-            If (ViewPitch < 32768)
-                Rot.Pitch = maxPitch * RotationRate.Pitch;
+            PitchLimit = 2 * RotationRate.Pitch;
+            if ( (ViewPitch > PitchLimit) && (ViewPitch < 65536 - PitchLimit) )
+            {
+                if (ViewPitch < 32768)
+                    Rot.Pitch = PitchLimit;
+                else
+                    Rot.Pitch = 65536 - PitchLimit;
+            }
             else
-                Rot.Pitch = 65536 - maxPitch * RotationRate.Pitch;
+                Rot.Pitch = ViewPitch;
         }
-        else
-            Rot.Pitch = ViewPitch;
+        // Stock's clamp with a pitch limit of 0. ViewPitch is 0-65535, so stock
+        // always gives 0 below 32768 and 65536 from there; Rot.Pitch starts at 0.
+        else if ( ViewPitch >= 32768 )
+            Rot.Pitch = 65536;
         DeltaRot = (Rotation - Rot);
         Pawn.SetRotation(Rot);
     }
 
-    // Perform actual movement
-    if ( (Level.Pauser == None) && (DeltaTime > 0) )
-        MoveAutonomous(DeltaTime, NewbRun, NewbDuck, NewbPressedJump, NewbDoubleJump, DoubleClickMove, Accel, DeltaRot);
-
-    if (RepInfo==None)
-        foreach DynamicActors(Class'UTComp_ServerReplicationInfo', RepInfo)
-            break;
+    // Perform actual movement: stock MoveAutonomous(), with HandleWalking() in it,
+    // inlined in the same order. MoveAutonomous is final, HandleWalking isn't
+    // overridden, and ProcessMove stays a virtual call for state overrides.
+    // (The lost-move recovery above still calls MoveAutonomous.)
+    if ( (Level.Pauser == None) && (DeltaTime > 0) && ((Pawn == None) || !Pawn.bHardAttach) )
+    {
+        if ( NewbRun )
+            bRun = 1;
+        else
+            bRun = 0;
+        if ( NewbDuck )
+            bDuck = 1;
+        else
+            bDuck = 0;
+        bPressedJump = NewbPressedJump;
+        bDoubleJump = NewbDoubleJump;
+        if ( Pawn != None )
+        {
+            // Pawn.SetWalking() does nothing unless the flag changes, so it's only
+            // called for a change (the only overrides, on warheads, are empty)
+            bNewWalking = NewbRun && !Region.Zone.IsA('WarpZoneInfo');
+            if ( Pawn.bIsWalking != bNewWalking )
+                Pawn.SetWalking(bNewWalking);
+        }
+        ProcessMove(DeltaTime, Accel, DoubleClickMove, DeltaRot);
+        if ( Pawn != None )
+            Pawn.AutonomousPhysics(DeltaTime);
+        else
+            AutonomousPhysics(DeltaTime);
+        bDoubleJump = false;
+    }
 
     // Accumulate movement error.
+    // RepInfo needs no lookup: on a server, PostBeginPlay picks up the one the
+    // mutator spawned at map load, before any client could connect.
     if ( ClientLoc == vect(0,0,0) )
 		return;		// first part of double servermove
-    else if ( Level.TimeSeconds - LastUpdateTime > 0.3 )
+    // Taken after the move: dying in it calls ForceDeathUpdate(), which moves LastUpdateTime
+    UpdateAge = MoveNow - LastUpdateTime;
+    if ( UpdateAge > 0.3 )
         ClientErr = 10000;
     else if (RepInfo.bMoveErrorAccumFix)
     {
-        if(Level.TimeSeconds - LastUpdateTime > Repinfo.MoveErrorAccumFixValue)
+        if(UpdateAge > Repinfo.MoveErrorAccumFixValue)
         {
             if ( Pawn == None )
                 LocDiff = Location - ClientLoc;
@@ -6045,7 +6134,7 @@ function ServerMove
             ClientErr = LocDiff Dot LocDiff;
         }
     }
-    else if ( (Level.TimeSeconds - LastUpdateTime > 180.0/Player.CurrentNetSpeed))
+    else if ( UpdateAge > 180.0/Player.CurrentNetSpeed )
     {
         if ( Pawn == None )
             LocDiff = Location - ClientLoc;
@@ -6076,7 +6165,7 @@ function ServerMove
         }
     //if ( (ClientErr != 10000) && (Pawn != None) )
 //		log(" Client Error at "$TimeStamp$" is "$ClientErr$" with acceleration "$Accel$" LocDiff "$LocDiff$" Physics "$Pawn.Physics);
-        LastUpdateTime = Level.TimeSeconds;
+        LastUpdateTime = MoveNow;
 
 		PendingAdjustment.TimeStamp = TimeStamp;
 		PendingAdjustment.newState = GetStateName();
