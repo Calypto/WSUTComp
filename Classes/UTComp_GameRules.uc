@@ -14,6 +14,7 @@ function int NetDamage( int OriginalDamage, int Damage, pawn injured, pawn insti
     local UTComp_PRI uPRI;
     local controller C;
     local bool IsGroupedDamageType;
+    local Controller InstigatorController;
 
     if(Damage>0 && InstigatedBy!=None && Injured!=None)
     {
@@ -58,31 +59,35 @@ function int NetDamage( int OriginalDamage, int Damage, pawn injured, pawn insti
                 uPRI.DamR+=Damage;
     }
 
-    DoTeamboostCheck(injured, instigatedBy, momentum);
+    // No team boosting: a teammate's hit doesn't push you. Self damage is never a team boost.
+    // The attacker is instigatedBy's controller; DelayedDamageInstigatorController is only the
+    // fallback for a delayed-damage hit whose shooter has no controller any more, the same rule
+    // as TeamGame.ReduceDamage. Checking it first (behind an || that also let self damage in)
+    // zeroed every later self push of a driver whose vehicle a teammate's splash had reached:
+    // Vehicle.DriverRadiusDamage stores the attacker on the driver and nothing clears it.
+    if (injured != instigatedBy && injured != None && injured.Controller != None
+        && (UTCompMutator.bNoTeamBoosting || UTCompMutator.bNoTeamBoostingVehicles))
+    {
+        if (instigatedBy != None)
+            InstigatorController = instigatedBy.Controller;
+        if (InstigatorController == None && DamageType != None && DamageType.default.bDelayedDamage)
+            InstigatorController = injured.DelayedDamageInstigatorController;
+        if (InstigatorController != None && InstigatorController != injured.Controller
+            && InstigatorController.SameTeamAs(injured.Controller))
+        {
+            if (Vehicle(injured) == None)
+            {
+                if (UTCompMutator.bNoTeamBoosting)
+                    Momentum = vect(0,0,0);
+            }
+            else if (UTCompMutator.bNoTeamBoostingVehicles)
+                Momentum = vect(0,0,0);
+        }
+    }
 
     if ( NextGameRules != None )
 		return NextGameRules.NetDamage( OriginalDamage,Damage,injured,instigatedBy,HitLocation,Momentum,DamageType );
 	return Damage;
-}
-
-function DoTeamboostCheck(Pawn injured, Pawn instigatedBy, out vector momentum)
-{
-    local controller InstigatorController;
-    if((((injured != instigatedBy) && injured != none) && injured.Controller != none) && ((instigatedBy != none) && instigatedBy.Controller != none) || injured.DelayedDamageInstigatorController != none)
-    {
-        InstigatorController = injured.DelayedDamageInstigatorController;
-        if(InstigatorController == none)
-        {
-            InstigatorController = instigatedBy.Controller;
-        }
-        if((InstigatorController != injured.Controller) && InstigatorController.SameTeamAs(injured.Controller))
-        {
-            if(UTCompMutator.bNoTeamBoosting && Vehicle(injured) == None)
-                Momentum = vect(0.0, 0.0, 0.0);
-            if(UTCompMutator.bNoTeamBoostingVehicles && Vehicle(injured) != None)
-                Momentum = vect(0.0, 0.0, 0.0);
-        }
-    }            
 }
 
 
